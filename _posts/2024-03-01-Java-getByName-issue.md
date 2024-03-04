@@ -9,18 +9,18 @@ tags:
 ## 개요
 멀티스레딩 Java 어플리케이션에 트래픽이 평소보다 조금 더 몰려 요청을 제대로 처리하지 못하는 장애가 발생했습니다. 하지만 장애 당시 트래픽은 어플리케이션에서 예상하던 최대 수용 가능한 트래픽에 한참 못 미치는 수준이었습니다.
 
-장애 원인을 분석해보니 특정 조건을 만족할 때 DNS 질의가 성능 문제를 일으킴을 확인했습니다.
+장애 원인을 분석해 보니 특정 조건을 만족할 때 DNS 질의가 성능 문제를 일으킴을 확인했습니다.
 
 ## 문제 발생 조건
 문제가 발생하는 조건은 다음과 같습니다.
-1. Java DNS 캐시 TTL이 0초로 설정되어있습니다.
+1. Java DNS 캐시 TTL이 0초로 설정되어 있습니다.
 2. 멀티스레딩을 사용하고 있습니다.
 3. 어플리케이션에서 다른 서비스 API를 호출하여 DNS 질의가 발생합니다.
 4. 매 API 호출 시마다 DNS 질의가 발생합니다. (커넥션을 유지하지 않는 등의 이유로)
 
-위 조건들을 모두 만족할 때, `InetAddress`의 `getByName` 메소드에 두가지 문제점이 발생합니다.
+위 조건들을 모두 만족할 때, `InetAddress`의 `getByName` 메소드에 두 가지 문제점이 발생합니다.
 
-아래는 문제가 발생하는 상황을 재현한 코드입니다. 스레드 수 `num_threads`를 입력으로 받아 그 수 만큼 스레드를 만들고, 각 스레드에서 DNS 질의를 나눠서 처리합니다. DNS 캐싱을 하지 않도록 `networkaddress.cache.ttl`을 `0`으로 설정했습니다.
+아래는 문제가 발생하는 상황을 재현한 코드입니다. 스레드 수 `num_threads`를 입력으로 받아 그 수만큼 스레드를 만들고, 각 스레드에서 DNS 질의를 나눠서 처리합니다. DNS 캐싱을 하지 않도록 `networkaddress.cache.ttl`을 `0`으로 설정했습니다.
 
 ```java
 import java.net.InetAddress;
@@ -63,7 +63,7 @@ class LookupThread implements Runnable {
 ## 두가지 문제
 
 ### 1. 동일 호스트 질의 시  발생
-우선 클라이언트로부터 요청을 받으면 매번 서비스를 호출하고, 그 결과를 전달해주는 어플리케이션이 있다고 해보겠습니다. 만약 이 어플리케이션이 코어가 10개 이상인 서버에서 10개 스레드로 동작한다고 하면, 아래 그림처럼 동작하기를 기대합니다.
+우선 클라이언트로부터 요청을 받으면 매번 서비스를 호출하고, 그 결과를 전달해 주는 어플리케이션이 있다고 해보겠습니다. 만약 이 어플리케이션이 코어가 10개 이상인 서버에서 10개 스레드로 동작한다고 하면, 아래 그림처럼 동작하기를 기대합니다.
 
 ![Java-inetaddress-perf-image1.png](/assets/images/Java-inetaddress-perf-image1.png)
 
@@ -71,13 +71,18 @@ class LookupThread implements Runnable {
 
 클라이언트의 요청 하나는 DNS 질의 시간 + 다른 서비스 API 응답 대기 시간인 `2ms`에 처리되므로 1개 스레드에서 초당 500개의 요청을 처리할 수 있고, 10개 스레드로는 초당 5,000개의 요청을 처리할 수 있습니다.
 
-하지만 실제 상황에서는 초당 요청이 약 1,000개를 넘을 때 부터 어플리케이션이 처리를 못하기 시작했고, 응답 시간이 느려지며 장애가 발생했습니다.
+하지만 실제 상황에서는 초당 요청이 약 1,000개를 넘을 때부터 어플리케이션이 처리를 못하기 시작했고, 응답 시간이 느려지며 장애가 발생했습니다.
 
 문제 원인을 파악하기 위해 tcpdump를 실행하였는데, DNS 질의 부분에서 특이한 점을 발견했습니다.
 
 ![Java-inetaddress-perf-image2.png](/assets/images/Java-inetaddress-perf-image2.png)
 
-위 사진에서 주황색 네모는 DNS 질의 패킷을, 연두색 네모는 DNS 응답 패킷을 나타냅니다. 분명 요청을 10개 스레드에서 병렬로 처리하고 있는데, DNS 질의/응답은 한번에 하나씩만 동작하고 있는 걸로 보입니다.
+위 사진에서 주황색 네모는 DNS 질의 패킷을, 연두색 네모는 DNS 응답 패킷을 나타냅니다. 분명 요청을 10개 스레드에서 병렬로 처리하고 있는데, DNS 질의/응답은 한 번에 하나씩만 동작하고 있는 걸로 보입니다.
+
+만약 DNS 질의가 여러 스레드에서 동시에 진행되었다면 아래 사진처럼 동시에 여러 개의 DNS 질의가 발생하는 모습이 보였을 겁니다.
+
+![Java-inetaddress-perf-image9.png](/assets/images/Java-inetaddress-perf-image9.png)
+
 
 Java의 DNS 질의 동작에 어떤 문제가 있다고 생각하고, DNS 관련 로직을 살펴보았습니다. Java의 DNS 질의는 `InetAddress`의 `getByName` 메소드를 통해 실행됩니다. openjdk 19 버전 기준으로, `getByName`의 플로우는 다음과 같습니다.
 
@@ -110,18 +115,18 @@ private static final class NameServiceAddresses implements Addresses {
         return addresses.get();
 ```
 
-이 락은 여러 스레드가 동시에 동일 호스트를 질의할 때, 한 스레드에서만 DNS 질의를 수행하고 캐시에 값을 넣게 하기 위함인 것으로 보입니다. 하지만 DNS 응답을 캐싱하지 않도록 설정했음에도 락이 걸리는 것은 아이러니합니다. 심지어 캐싱을 하지 않게 설정하면 모든 스레드에서 매번 `NameServiceAddresses.get` 메소드가 호출되므로, DNS 질의는 한번에 하나의 스레드에서만 진행이 되고 다른 스레드에서는 대기를 하게 됩니다.
+이 락은 여러 스레드가 동시에 동일 호스트를 질의할 때, 한 스레드에서만 DNS 질의를 수행하고 캐시에 값을 넣게 하기 위함인 것으로 보입니다. 하지만 DNS 응답을 캐싱하지 않도록 설정했음에도 락이 걸리는 것은 아이러니합니다. 심지어 캐싱을 하지 않게 설정하면 모든 스레드에서 매번 `NameServiceAddresses.get` 메소드가 호출되므로, DNS 질의는 한 번에 하나의 스레드에서만 진행이 되고 다른 스레드에서는 대기를 하게 됩니다.
 
 즉, 실제로 10개 스레드에서 요청을 처리하는 모습은 아래 그림과 같습니다.
 
 ![Java-inetaddress-perf-image4.png](/assets/images/Java-inetaddress-perf-image4.png)
 
-이렇게 되면 한 서버에서 처리 가능한 요청은 초당 약 1,000개 밖에 되지 않습니다. 또, 어플리케이션 성능이 DNS 응답 대기 시간에 크게 영향을 받게 됩니다. 만약 DNS 응답 대기 시간 평균이 단 1ms만 느려져도, 초당 처리 가능한 요청 수는 절반으로 감소합니다.
+이렇게 되면 한 서버에서 처리 가능한 요청은 초당 약 1,000개밖에 되지 않습니다. 또, 어플리케이션 성능이 DNS 응답 대기 시간에 크게 영향을 받게 됩니다. 만약 DNS 응답 대기 시간 평균이 단 1ms만 느려져도, 초당 처리 가능한 요청 수는 절반으로 감소합니다.
 
 ### 2. Race condition 문제
 위 문제 말고도 동일 조건에서 race condition으로 인해 DNS 응답이 느려지는 문제도 있습니다.
 
-문제 상황을 재현한 코드에서 `num_threads`를 1로하여 실행하고, async-profiler로 실행된 함수들을 트레이싱해봤습니다.
+문제 상황을 재현한 코드에서 `num_threads`를 1로 하여 실행하고, async-profiler로 실행된 함수들을 트레이싱 해봤습니다.
 
 ![Java-inetaddress-perf-image6.png](/assets/images/Java-inetaddress-perf-image6.png)
 
@@ -155,7 +160,18 @@ Race condition이 발생하는 상황은 다음과 같습니다.
 11. Thread 2에서 캐시에 있는 Addresses 객체가 본인 것과 동일한지 다시 확인합니다. Thread 2가 가진 것은 `NS1`이지만, 캐시에 있는 것은 `NS2`입니다. 서로 다르므로 Thread 2는 락을 풀고 `NS2.get`을 실행합니다. `NS2`의 타입도 `NameServiceAddresses` 이므로 `NameServiceAddresses.get`이 다시 실행됩니다.
 12. Thread 1이 락을 획득합니다. 8번으로 돌아가 반복됩니다...
 
-이렇게 매우 희박한 확률로 `NameServiceAddresses.get`이 불필요하게 여러 차례 실행되면 DNS 질의 성능이 나빠질 수 있습니다. 스레드가 1개인 상황에서는 모든 DNS 질의가 1ms 내외로 끝났지만, 스레드가 2개 이상일 땐 전체 중 0.1%의 DNS 질의가 50ms 이상 걸렸고, 가장 느린 것은 1초 넘게 소요되기도 했습니다.
+스레드 수 별로 `InetAddress.getByName`의 성능을 측정해 봤습니다.
+
+![Java-inetaddress-perf-image10.png](/assets/images/Java-inetaddress-perf-image10.png){: width="550"}
+<center>[스레드가 1개일 때 InetAddress.getByName 실행 시간 분포]</center>
+
+스레드가 1개일 때는 99 백분위가 1ms 내외였고, 99.9 백분위는 5ms 내외였습니다.
+
+![Java-inetaddress-perf-image11.png](/assets/images/Java-inetaddress-perf-image11.png){: width="550"}
+<center>[스레드가 2개일 때 InetAddress.getByName 실행 시간 분포]</center>
+
+반면 race condition이 발생할 수 있는 2개 스레드에서는 99 백분위가 10ms 내외, 99.9 백분위는 75ms까지 증가했습니다. 심지어 아주 운이 나쁜 경우에는 DNS 질의 시간이 1초까지 증가하기도 했습니다.
+이렇게 희박한 확률로 `NameServiceAddresses.get`이 불필요하게 여러 차례 실행되면 DNS 질의 성능이 나빠질 수 있습니다.
 
 ## 해결 방법
 이 문제를 해결하는 가장 쉬운 방법은 발생 조건을 제거하는 것입니다.
