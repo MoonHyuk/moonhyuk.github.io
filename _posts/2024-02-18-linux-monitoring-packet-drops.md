@@ -8,9 +8,9 @@ tags:
 ---
 
 ## 패킷 유실을 모니터링해야 하는 이유
-패킷 유실은 호스트의 부하, 네트워크 혼잡 등의 이유로 발생할 수 있습니다. TCP를 사용하는 어플리케이션의 경우엔 패킷 유실이 발생하더라도 TCP 계층에서 재전송을 통해 전송을 보장해 줍니다. 하지만 패킷 유실이 발생하면 TCP의 혼잡 제어 동작으로 인해 throughput이 낮아지고, 재전송을 기다리는 동안 응답이 지연되는 등 성능 문제가 발생할 수 있기에 패킷 유실을 주의 깊게 모니터링해야 합니다.
+패킷 유실은 호스트의 부하, 네트워크 혼잡 등의 이유로 발생할 수 있습니다. TCP를 사용하는 어플리케이션의 경우엔 패킷 유실이 발생하더라도 TCP 계층에서 재전송을 통해 전송을 보장해 줍니다. 하지만 패킷 유실이 발생하면 TCP의 혼잡 제어 동작으로 인해 throughput이 낮아지고, 재전송을 기다리는 동안 응답이 지연되는 등 성능 문제가 발생할 수 있습니다.
 
-리눅스 호스트에서 패킷이 유실되었다면 커널이 제공하는 관련 메트릭이나 트레이싱을 통해 직접적으로 모니터링할 수 있습니다. 만약 호스트 외부, 즉 네트워크나 상대방 호스트에서 패킷이 유실되었거나 앞선 방법으로는 탐지가 안되었다면 패킷 유실 복구 동작을 모니터링하여 간접적인 확인도 가능합니다.
+리눅스 호스트 내부에서 패킷이 유실되었다면 커널이 제공하는 다양한 메트릭이나 트레이싱을 통해 모니터링할 수 있습니다. 또 리눅스의 패킷 유실 복구 동작을 모니터링하면 호스트 내부 뿐만 아니라 호스트 위부, 즉 네트워크나 상대방 호스트에서의 패킷 유실도 간접적으로 모니터링이 가능합니다.
 
 이 두 가지 방법에 대해 자세히 알아보겠습니다.
 
@@ -357,10 +357,11 @@ net.ipv4.ip_forward = 0
 
 리눅스에서 유실된 패킷을 복구하는 동작을 관찰하면 패킷 유실이 있었음을 간접적으로 확인할 수 있습니다. 우선 리눅스의 TCP 계층에서 어떻게 유실된 패킷을 복구하는지 알아야 합니다.
 
-리눅스는 아래 3가지 방법으로 패킷 유실을 감지하고 복구합니다.
+리눅스는 아래 4가지 방법으로 패킷 유실을 감지하고 복구합니다.
 1. `Fast retransmission`: 3개의 중복된 ACK를 수신하면, 패킷 유실이 발생하였다고 판단하고 재전송
-2. `Tail Loss Probe(TLP)`: Probe 패킷을 보내 트랜젝션 끝부분에서의 유실을 감지
-3. `RTO 기반 재전송`: Fast retransmission과 TLP로 감지되지 않는 그 외 상황에서 발생. RTO 시간 동안 ACK가 오지 않으면 패킷이 유실되었다고 판단하고 재전송
+2. `SACK`: 수신자가 Selective ACK 옵션을 사용하여 데이터 중간에 유실이 있음을 알리고, 전송자는 SACK 정보를 바탕으로 재전송
+3. `Tail Loss Probe(TLP)`: Probe 패킷을 보내 트랜젝션 끝부분에서의 유실을 감지
+4. `RTO 기반 재전송`: 위 방법들로 감지되지 않는 그 외 상황에서 발생. RTO 시간 동안 ACK가 오지 않으면 패킷이 유실되었다고 판단하고 재전송
 
 이 중 가장 주의 깊게 보아야 하는 것은 RTO 기반 재전송입니다. RTO의 초깃값은 1초이며, 커넥션의 RTT 값에 따라 유동적으로 변합니다. 하지만 RTO의 최솟값은 200ms로 제한되어 있습니다. 최솟값을 변경할 수도 있지만, 그러면 불필요한 재전송(spurious retransmission) 빈도가 높아지므로 신중히 고려해야 합니다.
 
@@ -368,7 +369,7 @@ RTO 기반 재전송이 연달아 발생하는 경우에는 RTO가 지수적으�
 
 이렇게 RTO 기반 재전송이 일어나면, 최소 200ms에서 수 초의 응답 지연이 발생합니다. 성능이 매우 중요한 어플리케이션에서는 이것이 큰 문제로 여겨질 수 있습니다.
 
-아래는 패킷 유실 복구 동작(TLP, 재전송)과 실제 패킷 유실 간 관계를 표현하는 벤 다이어그램입니다.
+아래는 패킷 유실 복구 동작과 실제 패킷 유실 간 관계를 표현하는 벤 다이어그램입니다.
 
 ![TCP-packet-loss-diagram1.png](/assets/images/TCP-packet-loss-diagram1.png){: width="500"}
 
@@ -388,8 +389,7 @@ TcpExtTCPLossProbes
 TcpExtTCPLossProbeRecovery
 ```
 
-우선 `TcpRetransSegs`는 모든 재전송된 세그먼트 수입니다.
-TLP, Fast retransmission, RTO 기반 재전송으로 인해 전송된 세그먼트들이 합산됩니다. 이 메트릭은 아래 벤 다이어그램에 색칠된 영역을 의미합니다.
+우선 `TcpRetransSegs`는 모든 재전송된 세그먼트 수입니다. 이 메트릭은 아래 벤 다이어그램에 색칠된 영역을 의미합니다.
 
 ![TCP-packet-loss-diagram2.png](/assets/images/TCP-packet-loss-diagram2.png){: width="500"}
 
@@ -418,7 +418,7 @@ node_netstat_Tcp_RetransSegs
 ### 트레이싱
 `tcp_retransmit_skb` 함수와 `tcp_send_loss_probe` 함수를 트레이싱하여 간접적으로 패킷 유실을 확인할 수 있습니다.
 
-`tcp_retransmit_skb` 함수는 fast retransmission 또는 RTO 기반 재전송이 일어날 때 호출되고, `tcp_send_loss_probe`는 TLP 알고리즘에 따라 probe 패킷을 전송하기 위해 호출됩니다. 각 함수를 트레이싱하였을 때 모니터링되는 범위를 벤 다이어그램으로 그려보면 다음과 같습니다.
+`tcp_retransmit_skb` 함수는 fast retransmission 또는 RTO 기반 재전송 등이 일어날 때 호출되고, `tcp_send_loss_probe`는 TLP를 전송할 때 호출됩니다. 각 함수를 트레이싱하였을 때 모니터링되는 범위를 벤 다이어그램으로 그려보면 다음과 같습니다.
 
 ![TCP-packet-loss-diagram6.png](/assets/images/TCP-packet-loss-diagram6.png){: width="500"}
 <center>[tcp_retransmit_skb]</center>
@@ -426,21 +426,20 @@ node_netstat_Tcp_RetransSegs
 ![TCP-packet-loss-diagram7.png](/assets/images/TCP-packet-loss-diagram7.png){: width="500"}
 <center>[tcp_send_loss_probe]</center>
 
-두 함수를 모두 트레이싱하면 모든 유실된 패킷을 볼 수 있습니다. 하지만 `tcp_send_loss_probe` 함수의 트레이싱 결과는 주의하여 해석해야 합니다. TLP 중 매우 일부만 패킷 유실이기 때문입니다. 예를 들어 제 서버에서는 TLP 중 0.6%만 패킷 유실이었습니다.
+두 함수를 모두 트레이싱하면 모든 유실된 패킷을 볼 수 있습니다. 하지만 `tcp_send_loss_probe` 함수의 트레이싱 결과는 주의하여 해석해야 합니다. TLP 중 매우 일부만 실제로 패킷 유실 문제가 있기 때문입니다. 예를 들어 어느 한 서버에서는 TLP 중 0.6%만 TLP로 패킷 유실이 감지되었습니다.
 ```bash
 $ nstat -az | grep TCPLossProbe
 TcpExtTCPLossProbes             132938             0.0
 TcpExtTCPLossProbeRecovery      868                0.0
 ```
 
-반면 `tcp_retransmit_skb` 함수만 트레이싱하면 모든 유실된 패킷을 보지는 못하지만, 패킷 유실 감지 정확도가 높아집니다. 또, `tcp_retransmit_skb` 함수 트레이싱을 통해 주요 성능 문제를 야기하는 RTO 기반 재전송을 감지할 수 있습니다.
+반면 `tcp_retransmit_skb` 함수만 트레이싱하면 유실된 패킷을 모두 보지는 못하지만, 패킷 유실 감지 정확도가 높아집니다. 또 `tcp_retransmit_skb` 함수 트레이싱을 통해 주요 성능 문제를 야기하는 RTO 기반 재전송을 감지할 수 있습니다.
 
 어떤 함수들을 트레이싱할지는 상황에 따라 달라질 수도 있겠지만, 일반적으로는 `tcp_retransmit_skb` 함수만 트레이싱하여도 충분해 보입니다.
 
-`tcp_retransmit_skb` 함수를 트레이싱하는 툴은 이미 여러 사람들이 구현해놓았습니다. `tcpretrans`라는 이름으로 [Ftrace](https://github.com/brendangregg/perf-tools/blob/master/net/tcpretrans){:target="_blank"}, [bpftrace](https://github.com/iovisor/bpftrace/blob/master/tools/tcpretrans.bt){:target="_blank"}, [bcc](https://github.com/iovisor/bcc/blob/master/tools/tcpretrans.py){:target="_blank"}등의 기술들을 사용한 툴들이 있어 환경에 맞게 선택하여 사용하면 됩니다.
-각 툴들은 모두 TLP를 트레이싱하는 옵션도 제공합니다. (TLP를 켜면 `tcpretrans`라는 이름과는 맞지 않게 재전송이 아닌 세그먼트도 트레이싱합니다.)
+tcp_retransmit_skb 함수를 트레이싱 하는 건 많은 상황에서 유용하게 쓰일 수 있기에, 이를 쉽게 사용하게 하는 유저 영역 프로그램들이 이미 존재합니다. [Ftrace](https://github.com/brendangregg/perf-tools/blob/master/net/tcpretrans){:target="_blank"}로 구현된 것과 [bpftrace](https://github.com/iovisor/bpftrace/blob/master/tools/tcpretrans.bt){:target="_blank"}, [bcc](https://github.com/iovisor/bcc/blob/master/tools/tcpretrans.py){:target="_blank"}로 구현된 것들이 있습니다.
 
-이 중 Ftrace로 구현된 tcpretrans 툴은 서버에 동시 소켓이 수십만 이상일 경우 성능 문제가 발생하기에 주의해서 사용해야 합니다. 저는 이 툴을 약간 변경하여 성능을 개선시켰는데, [다른 포스트](/2024/02/18/improve-perftools-tcpretrans.html){:target="_blank"}에서 자세히 다루겠습니다.
+이 중 Ftrace로 구현된 tcpretrans 툴은 서버에 동시 소켓이 수십만 이상일 경우 성능 문제가 발생하므로 주의해서 사용해야 합니다. 저는 이 툴을 약간 변경하여 성능을 개선시켰는데, [다른 포스트](/2024/02/19/improve-perftools-tcpretrans.html){:target="_blank"}에서 자세히 다루겠습니다.
 
 아래는 tcpretrans 툴의 실행 결과 예시입니다. 유실된 세그먼트의 엔드포인트 IP 주소를 알 수 있어 해당 네트워크 경로에 문제가 없는지 검사해볼 수 있습니다.
 ```bash
@@ -455,7 +454,7 @@ TIME     PID    LADDR:LPORT          -- RADDR:RPORT          STATE
 ## 정리
 지금까지 리눅스에서 패킷 유실을 모니터링하는 방법들에 대해 알아보았습니다.
 
-리눅스의 네트워킹 스택이 워낙 방대하여, 이 글에서 미처 다루지 못한 것들도 많습니다. 처음부터 모든 메트릭을 다 이해하고 모니터링하는 것 보다는 실제로 문제들을 겪으면서 경험적으로 추가해가는 것도 좋은 방법일 것 같습니다.
+리눅스의 네트워킹 스택이 워낙 방대하여 이 글에서 미처 다루지 못한 것들도 많습니다. 처음부터 모든 메트릭을 다 이해하고 모니터링하는 것 보다는 실제로 문제들을 겪으면서 경험적으로 추가해가는 것도 좋은 방법일 것 같습니다.
 
 `tcpretrans`를 통한 트레이싱은 호스트 밖에서 발생한 네트워크의 문제도 간접적으로 확인이 가능하다는 점에서 매우 유용합니다. 네트워크 문제를 발견하는 좋은 시작점이 될 수 있습니다.
 
