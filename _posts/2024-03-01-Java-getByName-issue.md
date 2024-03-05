@@ -13,9 +13,9 @@ tags:
 
 ## 문제 발생 조건
 문제가 발생하는 조건은 다음과 같습니다.
-1. Java DNS 캐시 TTL이 0초로 설정되어 있습니다.
+1. DNS 캐시 TTL이 0초로 설정되어 있습니다.
 2. 멀티스레딩을 사용하고 있습니다.
-3. 어플리케이션에서 지속적으로 동일 도메인에 대한 DNS 질의를 합니다.
+3. 어플리케이션에서 다른 서비스 도메인을 질의합니다 (지속 커넥션을 사용하지 않아 매 요청마다 DNS 질의가 발생한다면 상황이 훨씬 악화됩니다).
 4. 어플리케이션에서 사용하는 네트워크 클라이언트 라이브러리에서 DNS 질의를 위해 `InetAddress`을 사용합니다.
 
 위 조건들을 모두 만족할 때 두 가지 성능 문제가 발생합니다.
@@ -124,7 +124,7 @@ private static final class NameServiceAddresses implements Addresses {
 이렇게 되면 한 서버에서 처리 가능한 요청은 초당 약 1,000개밖에 되지 않습니다. 또, 어플리케이션 성능이 DNS 응답 대기 시간에 크게 영향을 받게 됩니다. 만약 DNS 응답 대기 시간 평균이 단 1ms만 느려져도, 초당 처리 가능한 요청 수는 절반으로 감소합니다.
 
 ### 2. Race condition 문제
-위 문제 말고도 동일 조건에서 race condition으로 인해 DNS 응답이 느려지는 문제도 있습니다.
+위 문제 말고도 race condition으로 인해 DNS 응답이 느려지는 문제도 있습니다.
 
 문제 상황을 재현한 코드에서 `num_threads`를 1로 하여 실행하고, async-profiler로 실행된 함수들을 트레이싱 해봤습니다.
 
@@ -146,7 +146,7 @@ private static final class NameServiceAddresses implements Addresses {
 
 ![Java-inetaddress-perf-image8.png](/assets/images/Java-inetaddress-perf-image8.png){: width="550"}
 
-Race condition이 발생하는 상황은 다음과 같습니다.
+Race condition이 발생하는 상황을 예를 들어보겠습니다.
 1. Thread 1에서 `InetAddress.getByName("google.com")`이 실행됩니다.
 2. 캐시에 `google.com`이 없으므로, Thread 1이 `NameServiceAddresses` 객체 `NS1`를 생성하고 캐시에 저장합니다.
 3. Thread 1에서 `NameServiceAddresses.get`이 실행되고, Thread 1이 락을 획득합니다.
@@ -160,7 +160,7 @@ Race condition이 발생하는 상황은 다음과 같습니다.
 11. Thread 2에서 캐시에 있는 Addresses 객체가 본인 것과 동일한지 다시 확인합니다. Thread 2가 가진 것은 `NS1`이지만, 캐시에 있는 것은 `NS2`입니다. 서로 다르므로 Thread 2는 락을 풀고 `NS2.get`을 실행합니다. `NS2`의 타입도 `NameServiceAddresses` 이므로 `NameServiceAddresses.get`이 다시 실행됩니다.
 12. Thread 1이 락을 획득합니다. 8번으로 돌아가 반복됩니다...
 
-스레드 수 별로 `InetAddress.getByName`의 성능을 측정해 봤습니다.
+이 Race condition이 성능에 얼마나 영향을 미칠지 알아보기 위해 스레드 수를 바꿔가며 `InetAddress.getByName`의 성능을 측정해 봤습니다.
 
 ![Java-inetaddress-perf-image10.png](/assets/images/Java-inetaddress-perf-image10.png){: width="550"}
 <center>[스레드가 1개일 때 InetAddress.getByName 실행 시간 분포]</center>
@@ -184,4 +184,4 @@ Race condition이 발생하는 상황은 다음과 같습니다.
 
 등의 방법들이 있습니다.
 
-근본적인 해결을 위해서는 Java에서 DNS 캐시 TTL을 0으로 설정했을 때는 `NameServiceAddresses`에서 락을 걸거나 캐시된 객체를 확인하는 등의 불필요한 동작을 하지 않도록 수정되어야 합니다.
+하지만 근본적인 해결을 위해서는 Java에서 DNS 캐시 TTL을 0으로 설정했을 때 `NameServiceAddresses`에서 불필요한 락을 걸거나 캐시된 객체를 확인하는 등의 동작을 하지 않도록 수정되어야 합니다.
