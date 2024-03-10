@@ -2,8 +2,9 @@
 title: Java InetAddress DNS 질의 성능 문제
 tags:
   - Java
-  - multithread
-  - race condition
+  - DNS
+  - Multithreading
+  - Race Condition
 ---
 
 ## 개요

@@ -2,11 +2,11 @@
 title: perf-tools의 tcpretrans 스크립트 성능 개선기
 tags:
   - Linux Networking
-  - monitoring
-  - TCP Retransmission
-  - ftrace
-  - kprobe
-  - tracepoint
+  - Monitoring
+  - TCP/IP
+  - Ftrace
+  - Kprobe
+  - Tracepoint
 ---
 
 ## 개요

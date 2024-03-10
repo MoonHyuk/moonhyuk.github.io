@@ -2,8 +2,8 @@
 title: 리눅스에서 패킷 유실을 모니터링하는 방법
 tags:
   - Linux Networking
-  - monitoring
-  - TCP Retransmission
+  - Monitoring
+  - TCP/IP
   - node_exporter
 ---
 
