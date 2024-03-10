@@ -202,6 +202,8 @@ $ cat /sys/kernel/tracing/trace
  ...
 ```
 
+따라서 만약 TLP로 인한 재전송은 제외하고 싶고 기존 `perf-tools`의 `tcpretrans`를 사용하기에는 성능 문제가 우려된다면, Bpftrace 또는 bcc 기반의 `tcpretrans`를 사용해야 합니다.
+
 [^1]: [https://github.com/prometheus/node_exporter/blob/v1.7.0/README.md](https://github.com/prometheus/node_exporter/blob/v1.7.0/README.md){:target="_blank"}
 [^2]: [https://github.com/torvalds/linux/commit/e086101b150ae8e99e54ab26101ef3835fa9f48d](https://github.com/torvalds/linux/commit/e086101b150ae8e99e54ab26101ef3835fa9f48d){:target="_blank"}
 [^3]: [https://www.brendangregg.com/blog/2014-09-06/linux-ftrace-tcp-retransmit-tracing.html](https://www.brendangregg.com/blog/2014-09-06/linux-ftrace-tcp-retransmit-tracing.html){:target="_blank"}
