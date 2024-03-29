@@ -2,19 +2,14 @@
 title: perf-tools의 tcpretrans 스크립트 성능 개선기
 tags:
   - Linux Networking
-  - Monitoring
   - TCP/IP
   - Ftrace
-  - Kprobe
-  - Tracepoint
 ---
 
 ## 개요
-지난 [리눅스에서 패킷 유실을 모니터링하는 방법](/2024/02/18/linux-monitoring-packet-drops.html) 포스트에서는 왜 패킷 유실을 모니터링해야 하는지와 모니터링 방법들에 대해 알아봤습니다. 패킷 유실을 모니터링하는 방법 중 하나로 `tcp_retransmit_skb` 함수를 트레이싱하는 것도 소개 드렸습니다.
+패킷 재전송을 트레이싱 하는 건 많은 상황에서 유용하게 쓰일 수 있기에, 이를 쉽게 사용하게 하는 유저 영역 프로그램들이 이미 존재합니다. [Ftrace](https://github.com/brendangregg/perf-tools/blob/master/net/tcpretrans){:target="_blank"}로 구현된 것과 [bpftrace](https://github.com/iovisor/bpftrace/blob/master/tools/tcpretrans.bt){:target="_blank"}, [bcc](https://github.com/iovisor/bcc/blob/master/tools/tcpretrans.py){:target="_blank"}로 구현된 것들이 있습니다.
 
-`tcp_retransmit_skb` 함수를 트레이싱 하는 건 많은 상황에서 유용하게 쓰일 수 있기에, 이를 쉽게 사용하게 하는 유저 영역 프로그램들이 이미 존재합니다. [Ftrace](https://github.com/brendangregg/perf-tools/blob/master/net/tcpretrans){:target="_blank"}로 구현된 것과 [bpftrace](https://github.com/iovisor/bpftrace/blob/master/tools/tcpretrans.bt){:target="_blank"}, [bcc](https://github.com/iovisor/bcc/blob/master/tools/tcpretrans.py){:target="_blank"}로 구현된 것들이 있습니다.
-
-이 중 Ftrace를 사용하여 구현한 perf-tools 프로젝트의 `tcpretrans`는 이 툴들의 원조로, 10년 전에 작성되었지만 여전히 유용합니다. Bpftrace와 bcc 기반 툴을 사용하기 위해서는 linux-header와 컴파일러 등을 설치해야 하지만, perf-tools의 `tcpretrans`는 의존성 없이 스크립트 파일 하나만으로 바로 실행이 가능하다는 장점이 있습니다. 또, eBPF를 지원하지 않는 예전 버전의 커널에서도 잘 동작합니다.
+이 중 Ftrace를 사용하여 구현한 perf-tools 프로젝트의 `tcpretrans`는 이 툴들의 원조로, 10년 전에 작성되었지만 여전히 유용합니다. Bpftrace와 bcc 기반 툴을 사용하기 위해서는 여러 의존 패키지들을 설치해야 하지만, perf-tools의 `tcpretrans`는 의존성 없이 스크립트 파일 하나만으로 바로 실행이 가능하다는 장점이 있습니다. 또, eBPF를 지원하지 않는 예전 버전의 커널에서도 잘 동작합니다.
 
 그러나 perf-tools의 `tcpretrans`는 오래전에 만들어진 만큼 예전 방식으로 구현되어 있습니다. 이로 인해 커넥션이 매우 많은 서버에서는 성능 문제가 생길 수도 있습니다.
 
@@ -160,7 +155,7 @@ int __tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb, int segs)
     return err;
 }
 ```
-`__tcp_retransmit_skb` 함수는 tail loss probe로 인해 재전송될 때도 실행됩니다.
+문제는 `__tcp_retransmit_skb` 함수가 tail loss probe로 인해 재전송될 때도 실행된다는 점입니다.
 ```c
 void tcp_send_loss_probe(struct sock *sk)
 {
@@ -170,11 +165,11 @@ void tcp_send_loss_probe(struct sock *sk)
     // ...
 }
 ```
-따라서 `tcp_retransmit_skb` tracepoint로 트레이싱을 하면 TLP로 인한 재전송도 함께 보입니다. TLP는 네트워크에 문제가 없어도 자주 발생하기 때문에, 트레이싱 결과 만으로는 실제로 패킷 유실이 있었는지 판단하기 어려워집니다. 기존 `tcpretrans` 스크립트는 `-l` 옵션을 통해 TLP 재전송도 함께 트레이싱할지를 제어할 수 있었습니다.
+따라서 `tcp_retransmit_skb` tracepoint로 트레이싱을 하면 TLP로 인한 재전송도 함께 보입니다. TLP는 네트워크에 문제가 없어도 자주 발생할 수 있기 때문에, 트레이싱 결과 만으로는 실제로 패킷 유실이 있었는지 판단하기 어려워집니다.
 
 이땐 `nstat` 명령어 결과 중 `TcpExtTCPLossProbes` 통계 값을 함께 봐야합니다. 트레이싱에 재전송된 패킷이 잡힘과 동시에 `TcpExtTCPLossProbes` 값이 증가했다면 그 패킷은 TLP로 인해 재전송된 것이었을 겁니다.
 
-혹은 ftrace에서 stacktrace를 출력하는 기능을 켜 확인할 수도 있습니다.
+혹은 ftrace에서 stacktrace를 출력하는 기능을 켜 어떤 함수에서 `__tcp_retransmit_skb`가 실행되었는지 확인할 수도 있습니다.
 ```
 $ echo 1 > /sys/kernal/tracing/options/stacktrace
 ```
@@ -202,7 +197,9 @@ $ cat /sys/kernel/tracing/trace
  ...
 ```
 
-따라서 만약 TLP로 인한 재전송은 제외하고 싶고 기존 `perf-tools`의 `tcpretrans`를 사용하기에는 성능 문제가 우려된다면, Bpftrace 또는 bcc 기반의 `tcpretrans`를 사용해야 합니다.
+기존 kprobe 기반 `tcpretrans` 스크립트에서는 `-l` 옵션을 통해 TLP 재전송도 함께 트레이싱할지를 선택할 수 있었지만 tracepoint를 사용한 구현에서는 이를 구분하기 까다로운 점은 아쉽습니다.
+
+따라서 만약 TLP로 인한 재전송은 트레이싱에서 제외하고 싶고 기존 `perf-tools`의 `tcpretrans`를 사용하기에는 성능 문제가 우려된다면, eBPF를 사용하는 것을 고려해야 합니다.
 
 [^1]: [https://github.com/prometheus/node_exporter/blob/v1.7.0/README.md](https://github.com/prometheus/node_exporter/blob/v1.7.0/README.md){:target="_blank"}
 [^2]: [https://github.com/torvalds/linux/commit/e086101b150ae8e99e54ab26101ef3835fa9f48d](https://github.com/torvalds/linux/commit/e086101b150ae8e99e54ab26101ef3835fa9f48d){:target="_blank"}
