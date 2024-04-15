@@ -338,7 +338,7 @@ net.ipv4.ip_forward = 0
 
 그러나 `kfree_skb` tracepoint는 제공해 주는 정보가 제한적이라는 한계가 있습니다. 커널 5.17 미만 버전에서는 skb의 메모리 주소 정도만 알려주는데, 이 정보만으로는 분석이 어렵습니다.
 
-커널 5.17 버전부터는 패킷이 유실된 원인을 알려주는 DROP_REASON 필드가 추가되었습니다.[^4] DROP_REASON 필드 값들은 점점 추가되고 있으며, 커널 6.2 버전에서는 67개의 DROP_REASON 값을 제공하고 있습니다.[^5] 아래는 커널 6.2 버전에서 `kfree_skb` tracepoint의 출력 예시입니다. 존재하지 않는 소켓으로 패킷이 들어와 버려진 걸 알 수 있습니다.
+커널 5.17 버전부터는 패킷이 유실된 원인을 알려주는 DROP_REASON 필드가 추가되었고 함수 이름이 `kfree_skb_reason`으로 변경되었습니다.[^4] DROP_REASON 필드 값들은 점점 추가되고 있으며, 커널 6.2 버전에서는 67개의 DROP_REASON 값을 제공하고 있습니다.[^5] 아래는 커널 6.2 버전에서 `kfree_skb` tracepoint의 출력 예시입니다. 존재하지 않는 소켓으로 패킷이 들어와 버려진 걸 알 수 있습니다.
 ```text
 curl-58273   [000] ..s1. 2543693.602232: kfree_skb: skbaddr=... protocol=2048 location=... reason: NO_SOCKET
 ```
