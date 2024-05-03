@@ -298,5 +298,22 @@ metrics:
 모든 코드는 [github](https://github.com/MoonHyuk/ebpf_exporter)에서 보실 수 있습니다.
 
 ## 결과
+지금까지 만든 ebpf-exporter를 사용하면 아래와 같은 대시보드를 구성할 수 있습니다.
 ![2024050301.png](/assets/images/2024050301.png)
 
+이제 pod 간 통신의 디테일한 통계 정보를 알 수 있습니다. 위 예시를 보면 다행히 서로 다른 가용 영역 간의 과도한 트래픽은 없고, retrans가 일부 있지만 loss는 모두 0이기 때문에 네트워크 문제도 없음을 알 수 있습니다.   
+
+또, 조건 별 round trip time을 분석할 수도 있습니다. 아래 그림은 ap-northeast-2c 내부 통신의 rtt 분포입니다. Rtt가 모두 1ms 미만인 것을 볼 수 있습니다.
+![2024050302.png](/assets/images/2024050302.png)
+
+아래 그림은 ap-northeast-2c와 ap-northeast-2b간 통신의 rtt 분포입니다. 대부분은 4ms에서 8ms 사이에 분포하고 있고, 일부는 8ms 이상이 되기도 했습니다.
+![2024050303.png](/assets/images/2024050303.png)
+
+Rtt는 TCP 대역폭 성능에 영향을 줍니다. TCP 대역폭은 `윈도우 크기 / rtt`로 계산되는데, 만약 호스트의 소켓 버퍼 크기 제한이 200KB이라면, rtt가 1ms인 통신에서는 단일 소켓에서 최대 200MBps의 대역폭 성능을 낼 수 있지만 rtt가 10ms라면 대역폭이 최대 20MBps로 감소합니다.
+
+따라서 단일 커넥션에서 대용량 데이터를 주고 받는 서비스에서는 긴 rtt로 인해 성능에 영향이 있을 수 있습니다. 이 경우에는 적절히 소켓 버퍼 크기를 늘려주어야 하는데, 이럴 때 측정된 rtt 값을 활용할 수도 있습니다.
+
+## 정리
+이렇게 eBPF를 활용하면 Istio나 AWS VPC Flow Logs로는 볼 수 없었던 또다른 네트워크 성능 지표를 관측할 수 있습니다. 또, ebpf-expoter의 커스텀 decoder와 쿠버네티스 API를 활용하면 다양한 쿠버네티스 정보를 prometheus label로 넣을 수도 있습니다. 
+
+이번 프로젝트에서는 eBPF를 통해 `tcp_sock` 구조체의 일부 필드만을 수집했지만 [리눅스 네트워크 모니터링 1편](https://lunalight.im/2024/02/18/how-to-monitoring-packet-drops.html)과 [2편](https://lunalight.im/2024/03/27/how-to-monitoring-tcp-congestion.html)에서 소개드린 주요 커널 함수들(`kfree_skb`, `tcp_retransmit_skb`, `tcp_set_ca_state` 등)을 트레이싱하면 더 자세한 네트워크 성능 모니터링이 가능합니다.
