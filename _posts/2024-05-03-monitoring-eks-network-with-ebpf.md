@@ -154,7 +154,6 @@ int BPF_PROG(inet_sock_set_state, struct sock *sk, int oldstate, int newstate)
 eBPF 맵의 키를 적절히 prometheus label로 변환시키기 위해서는 ebpf-exporter의 decorder를 사용해야 합니다. ebpf-exporter는 기본적으로 `inet_ip`, `string`, `syscalls` 등 여러 종류의 decoder들을 지원합니다.
 
 하지만 pod의 IP 주소를 가지고 pod가 실행된 namespace와 AWS 가용 영역을 가져오는 decoder는 없기에 구현이 필요합니다. 아래 decoder는 IP 주소를 입력받아 쿠버네티스 API를 통해 해당 IP 주소를 가진 pod와 그에 맞는 node를 조회하고 데이터를 가져옵니다. 
-이 코드는 decoder가 실행될 때마다 쿠버네티스 API를 호출하므로 실제 환경에서는 성능 문제가 있을 수 있습니다.
 
 ```golang
 package decoder
