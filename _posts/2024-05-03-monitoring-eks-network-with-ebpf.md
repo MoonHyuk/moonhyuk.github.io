@@ -7,9 +7,9 @@ tags:
 ---
 
 ## 놓치고 있는 지표들
-Istio를 사용하면 아주 다양한 어플리케이션 레이어의 성능 지표를 볼 수 있습니다. 또, AWS 환경에서는 VPC Flow Logs를 통해 엔드포인트 별 데이터 전송량을 볼 수 있습니다. 특히 AWS Flow Logs로 엔드포인트의 리전과 가용 영역 정보를 알 수 있어, 네트워크 전송량 과금을 모니터링할 때 유용합니다. 
+AWS 환경에서는 VPC Flow Logs를 통해 엔드포인트 별 데이터 전송량을 볼 수 있습니다. 특히 AWS Flow Logs로 엔드포인트의 리전과 가용 영역 정보를 알 수 있어, 네트워크 전송량 과금을 모니터링할 때 유용합니다. 
 
-그런데 TCP 계층의 성능 모니터링은 어떻게 해야 할까요? TCP 계층에서도 패킷 유실 또는 수신 버퍼 부족으로 인한 대역폭 감소 및 응답 지연 문제가 발생할 수 있습니다. 하지만 이를 모니터링하는 것은 쉽지 않은데, 이때 필요한 것이 eBPF입니다. 또, Cloudflare의 [ebpf-exporter](https://github.com/cloudflare/ebpf_exporter)를 사용하면 eBPF 프로그램을 쉽게 prometheus exporter로 만들 수 있습니다.  
+그런데 TCP 계층의 성능 모니터링은 어떻게 해야 할까요? TCP 계층에서는 패킷 유실, out-of-order delivery로 인한 latency 증가, throughput 저하 등의 성능 문제가 발생할 수 있습니다. 하지만 이를 모니터링하는 것은 쉽지 않은데, 이때 필요한 것이 eBPF입니다. 또, Cloudflare의 [ebpf-exporter](https://github.com/cloudflare/ebpf_exporter)를 사용하면 eBPF 프로그램을 쉽게 prometheus exporter로 만들 수 있습니다.  
 
 ## TCP 성능 지표
 eBPF로 트레이싱 가능한 TCP 성능 지표들은 매우 많습니다. 이번에는 `tcp_sock` 구조체를 트레이싱하는 것만 다루겠습니다. 다양한 성능 지표들이 한 구조체 안에 모여있어 쉽게 시작할 수 있기 때문입니다. 
@@ -307,10 +307,6 @@ metrics:
 
 아래 그림은 ap-northeast-2c와 ap-northeast-2b간 통신의 rtt 분포입니다. 대부분은 4ms에서 8ms 사이에 분포하고 있고, 일부는 8ms 이상이 되기도 했습니다.
 ![2024050303.png](/assets/images/2024050303.png)
-
-Rtt는 TCP 대역폭 성능에 영향을 줍니다. TCP 대역폭은 `윈도우 크기 / rtt`로 계산되는데, 만약 호스트의 소켓 버퍼 크기 제한이 200KB이라면, rtt가 1ms인 통신에서는 단일 소켓에서 최대 200MBps의 대역폭 성능을 낼 수 있지만 rtt가 10ms라면 대역폭이 최대 20MBps로 감소합니다.
-
-따라서 단일 커넥션에서 대용량 데이터를 주고 받는 서비스에서는 긴 rtt로 인해 성능에 영향이 있을 수 있습니다. 이 경우에는 적절히 소켓 버퍼 크기를 늘려주어야 하는데, 이럴 때 측정된 rtt 값을 활용할 수도 있습니다.
 
 ## 정리
 이렇게 eBPF를 활용하면 Istio나 AWS VPC Flow Logs로는 볼 수 없었던 또다른 네트워크 성능 지표를 관측할 수 있습니다. 또, ebpf-expoter의 커스텀 decoder와 쿠버네티스 API를 활용하면 다양한 쿠버네티스 정보를 prometheus label로 넣을 수도 있습니다. 
